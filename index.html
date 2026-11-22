@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#f16a35">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SOUQ HUB">
+<title>SOUQ HUB | Buy & Sell Anything Marketplace</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="rtl">
+
+<div class="announcement" id="announcementBar" data-i18n="announcement">بيع واشتري أي حاجة بسهولة ✦ نسخة تجريبية</div>
+
+<header class="header">
+    <a href="#home" class="logo">SOUQ<span>HUB</span></a>
+
+    <nav id="mainNav">
+        <a href="#home" data-i18n="nav_home">الرئيسية</a>
+        <a href="#shop" data-i18n="nav_shop">كل الإعلانات</a>
+        <a href="#shop?category=phones" data-i18n="cat_phones">موبايلات</a>
+        <a href="#shop?category=laptops" data-i18n="cat_laptops">لابتوبات</a>
+        <a href="#shop?category=shoes" data-i18n="cat_shoes">أحذية</a>
+        <a href="#shop?category=gaming" data-i18n="cat_gaming">ألعاب</a>
+        <a href="#shop?category=vehicles" data-i18n="cat_vehicles">سيارات</a>
+        <a href="#shop?category=fashion" data-i18n="cat_fashion">أزياء</a>
+        <a href="#seller" id="sellerNavLink" data-i18n="nav_seller" style="display:none;color:var(--orange);font-weight:800;">لوحة البائع</a>
+        <a href="#delivery" id="deliveryNavLink" data-i18n="nav_delivery" style="display:none;color:#0a7;font-weight:800;">لوحة التوصيل</a>
+    </nav>
+
+    <div class="header-actions">
+        <button type="button" id="installAppBtn" class="install-btn" title="Add to Home Screen">📲 App</button>
+        <select id="langSelect" class="lang-select" aria-label="Language">
+            <option value="ar">عربي</option>
+            <option value="en">EN</option>
+        </select>
+        <button id="searchBtn" type="button" class="icon-btn" title="Search">🔍</button>
+        <a href="#wallet" id="walletIconLink" class="icon-link" title="المحفظة / Wallet">👛</a>
+        <a href="#account" id="accountIconLink" class="icon-link" title="حسابي / Account">👤</a>
+        <a href="#cart" class="cart-button"><span data-i18n="bag">السلة</span> <span id="cartCount">0</span></a>
+    </div>
+</header>
+
+<div class="noon-cat-strip" id="noonCategoryStrip" aria-label="Quick Categories"></div>
+
+<div class="search-bar" id="searchBar">
+    <input id="searchInput" placeholder="ابحث عن أي حاجة: موبايلات، لابتوبات، أحذية، سيارات، ألعاب...">
+    <button id="cameraSearchBtn" type="button" title="Camera Search" class="camera-trigger">📷</button>
+    <input id="cameraFileInput" type="file" accept="image/*" capture="environment" style="display:none;">
+    <button id="searchClose" type="button">✕</button>
+</div>
+
+<div class="camera-modal" id="cameraModal" style="display:none;">
+    <div class="camera-box">
+        <div class="camera-head">
+            <strong id="cameraModalTitle">البحث بالكاميرا (Camera Search)</strong>
+            <button type="button" id="closeCameraModal">✕</button>
+        </div>
+        <video id="cameraVideo" autoplay playsinline></video>
+        <canvas id="cameraCanvas" style="display:none;"></canvas>
+        <div id="cameraPreviewWrap" style="display:none;margin-top:12px;">
+            <img id="cameraPreviewImg" alt="Captured preview" style="width:100%;max-height:210px;object-fit:cover;border:1px solid #ddd;">
+        </div>
+        <div class="camera-controls">
+            <button type="button" class="btn" id="snapPhotoBtn">📸 Capture Photo</button>
+            <button type="button" class="btn btn-light" id="uploadPhotoBtn">🖼️ Upload Image</button>
+            <input id="cameraQueryHint" placeholder="كلمة أو لون (مثال: موبايل، حذاء، لابتوب)..." style="flex:1;min-width:180px;padding:12px;border:1px solid #ddd;">
+            <button type="button" class="btn btn-orange" id="applyCameraSearchBtn">ابحث الآن</button>
+        </div>
+    </div>
+</div>
+
+<div class="camera-modal" id="installGuideModal" style="display:none;">
+    <div class="camera-box">
+        <div class="camera-head">
+            <strong id="installGuideTitle">إضافة التطبيق للشاشة الرئيسية 📲</strong>
+            <button type="button" id="closeInstallGuide">✕</button>
+        </div>
+        <p id="installGuideText" style="font-size:13px;color:#444;line-height:1.8;">• <strong>أندرويد (Chrome):</strong> افتح قائمة المتصفح (⋮) واختر <strong>إضافة إلى الشاشة الرئيسية (Add to Home screen)</strong>.<br>• <strong>آيفون (Safari):</strong> اضغط على زر المشاركة (Share ⬆️) واختر <strong>إضافة إلى الشاشة الرئيسية (Add to Home Screen)</strong>.</p>
+        <div class="camera-controls">
+            <button type="button" class="btn btn-orange" id="gotInstallGuideBtn">حسناً</button>
+        </div>
+    </div>
+</div>
+
+<main id="app"></main>
+
+<footer class="footer">
+    <div class="footer-top">
+        <div>
+            <a href="#home" class="logo footer-logo">SOUQ<span>HUB</span></a>
+            <p data-i18n="footer_tagline">بيع واشتري أي حاجة بسهولة في مكان واحد.</p>
+        </div>
+        <div>
+            <h4 data-i18n="footer_shop">الأقسام</h4>
+            <a href="#shop" data-i18n="all_products">كل المنتجات</a>
+            <a href="#shop?category=phones" data-i18n="cat_phones">موبايلات</a>
+            <a href="#shop?category=laptops" data-i18n="cat_laptops">لابتوبات</a>
+            <a href="#shop?category=shoes" data-i18n="cat_shoes">أحذية</a>
+            <a href="#shop?category=gaming" data-i18n="cat_gaming">ألعاب وكونسول</a>
+        </div>
+        <div>
+            <h4 data-i18n="footer_help">المساعدة</h4>
+            <a href="#account" data-i18n="my_account">حسابي</a>
+            <a href="#orders" data-i18n="my_orders">طلباتي</a>
+            <a href="#wallet" data-i18n="nav_admin">المحفظة</a>
+        </div>
+        <div>
+            <h4 data-i18n="footer_about">عن المنصة</h4>
+            <p data-i18n="footer_about_text">منصة متكاملة لبيع وشراء كل حاجة.</p>
+        </div>
+    </div>
+    <div class="footer-bottom">
+        <span>© 2026 SOUQ HUB</span>
+        <span data-i18n="footer_bottom">بيع واشتري أي حاجة.</span>
+    </div>
+</footer>
+
+<div id="toast" class="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
