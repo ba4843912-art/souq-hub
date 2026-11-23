@@ -1,3 +1,212 @@
+// === SOUQ HUB - Error Monitoring & Gmail Alert System ===
+const SOUQHUB_MONITOR_CONFIG = {
+    appName: "SOUQ HUB",
+    emailjsPublicKey: "RlxyR5CXv7OY8AB4g",
+    emailjsServiceId: "service_rw1891e",
+    emailjsTemplateId: "template_mug1tfb",
+    emailjsSdkUrl: "https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js",
+    maxMessageLength: 400,
+    maxLocationLength: 200
+};
+
+const _souqHubSentAlerts = new Set();
+let _souqHubEmailJsPromise = null;
+
+function souqHubLoadEmailJs() {
+    if (_souqHubEmailJsPromise) {
+        return _souqHubEmailJsPromise;
+    }
+
+    _souqHubEmailJsPromise = new Promise((resolve, reject) => {
+        if (window.emailjs) {
+            window.emailjs.init({ publicKey: SOUQHUB_MONITOR_CONFIG.emailjsPublicKey });
+            resolve(window.emailjs);
+            return;
+        }
+
+        if (!SOUQHUB_MONITOR_CONFIG.emailjsPublicKey) {
+            reject(new Error("EmailJS Public Key is missing."));
+            return;
+        }
+
+        const scriptElement = document.createElement("script");
+        scriptElement.src = SOUQHUB_MONITOR_CONFIG.emailjsSdkUrl;
+        scriptElement.async = true;
+
+        scriptElement.onload = () => {
+            try {
+                if (!window.emailjs) {
+                    reject(new Error("EmailJS SDK failed to initialize."));
+                    return;
+                }
+                window.emailjs.init({ publicKey: SOUQHUB_MONITOR_CONFIG.emailjsPublicKey });
+                resolve(window.emailjs);
+            } catch (initError) {
+                reject(initError);
+            }
+        };
+
+        scriptElement.onerror = () => {
+            reject(new Error("Failed to load EmailJS SDK script."));
+        };
+
+        document.head.appendChild(scriptElement);
+    });
+
+    return _souqHubEmailJsPromise;
+}
+
+function souqHubExtractLocation(stackTrace, fallbackLocation = "") {
+    if (typeof stackTrace === "string" && stackTrace.trim().length > 0) {
+        const fileMatch = stackTrace.match(/([\w.-]+\.(?:js|html|mjs|cjs)(?::\d+:\d+)?)/i);
+        if (fileMatch && fileMatch[1]) {
+            return fileMatch[1];
+        }
+    }
+
+    if (typeof fallbackLocation === "string" && fallbackLocation.trim().length > 0) {
+        return fallbackLocation.trim();
+    }
+
+    return "غير محدد";
+}
+
+function souqHubFormatTime() {
+    try {
+        return new Date().toLocaleString("ar-EG");
+    } catch (_) {
+        return new Date().toISOString();
+    }
+}
+
+async function notifyGmailOnError(payload = {}) {
+    const errorType = String(payload.type || "Runtime Error")
+        .trim()
+        .slice(0, 100);
+
+    const errorMessage = String(payload.message || "خطأ غير معروف")
+        .trim()
+        .slice(0, SOUQHUB_MONITOR_CONFIG.maxMessageLength);
+
+    const errorLocation = String(payload.location || "غير محدد")
+        .trim()
+        .slice(0, SOUQHUB_MONITOR_CONFIG.maxLocationLength);
+
+    const pageUrl = typeof window !== "undefined" && window.location
+        ? window.location.href
+        : "غير متاح";
+
+    const errorTime = souqHubFormatTime();
+    const dedupeKey = `${errorType}|${errorLocation}|${errorMessage}`;
+
+    if (_souqHubSentAlerts.has(dedupeKey)) {
+        return;
+    }
+    _souqHubSentAlerts.add(dedupeKey);
+
+    console.error(`[${SOUQHUB_MONITOR_CONFIG.appName} Error Monitor]`, {
+        type: errorType,
+        message: errorMessage,
+        location: errorLocation,
+        pageUrl: pageUrl,
+        time: errorTime
+    });
+
+    if (
+        !SOUQHUB_MONITOR_CONFIG.emailjsPublicKey ||
+        !SOUQHUB_MONITOR_CONFIG.emailjsServiceId ||
+        !SOUQHUB_MONITOR_CONFIG.emailjsTemplateId
+    ) {
+        return;
+    }
+
+    try {
+        const emailjsClient = await souqHubLoadEmailJs();
+        await emailjsClient.send(
+            SOUQHUB_MONITOR_CONFIG.emailjsServiceId,
+            SOUQHUB_MONITOR_CONFIG.emailjsTemplateId,
+            {
+                error_type: errorType,
+                error_message: errorMessage,
+                error_location: errorLocation,
+                page_url: pageUrl,
+                error_time: errorTime
+            }
+        );
+    } catch (_) {
+        // تجاهل أي خطأ ناتج عن إرسال الإشعار نفسه لتجنب حلقة تكرار
+    }
+}
+
+function souqHubHandleWindowError(event) {
+    if (!event) {
+        return;
+    }
+
+    const fileName = event.filename
+        ? event.filename.split("/").pop().split("?")[0]
+        : "";
+
+    const lineInfo = event.lineno
+        ? `:${event.lineno}${event.colno ? `:${event.colno}` : ""}`
+        : "";
+
+    const fallbackSource = fileName ? `${fileName}${lineInfo}` : "ملف غير معروف";
+    const stackText = event.error && event.error.stack ? event.error.stack : "";
+    const resolvedLocation = souqHubExtractLocation(stackText, fallbackSource);
+
+    const messageText = event.message
+        || (event.error && event.error.message)
+        || "حدث خطأ غير متوقع في الواجهة";
+
+    notifyGmailOnError({
+        type: "JS Error",
+        message: messageText,
+        location: resolvedLocation
+    });
+}
+
+function souqHubHandleUnhandledRejection(event) {
+    if (!event) {
+        return;
+    }
+
+    const reason = event.reason;
+    let messageText = "Unhandled Promise Rejection";
+    let stackText = "";
+
+    if (reason && typeof reason === "object") {
+        messageText = reason.message || JSON.stringify(reason);
+        stackText = reason.stack || "";
+    } else if (typeof reason !== "undefined") {
+        messageText = String(reason);
+    }
+
+    const resolvedLocation = souqHubExtractLocation(stackText, "Async / Fetch");
+
+    notifyGmailOnError({
+        type: "Promise / Network",
+        message: messageText,
+        location: resolvedLocation
+    });
+}
+
+function souqHubInitErrorMonitoring() {
+    if (typeof window === "undefined") {
+        return;
+    }
+
+    if (window.__SOUQHUB_ERROR_MONITOR_ACTIVE__) {
+        return;
+    }
+    window.__SOUQHUB_ERROR_MONITOR_ACTIVE__ = true;
+
+    window.addEventListener("error", souqHubHandleWindowError);
+    window.addEventListener("unhandledrejection", souqHubHandleUnhandledRejection);
+}
+
+souqHubInitErrorMonitoring();
+
 const app = document.getElementById("app");
 const BUYER_FEE_RATE = 0.10;
 const SELLER_FEE_RATE = 0.10;
