@@ -207,6 +207,255 @@ function souqHubInitErrorMonitoring() {
 
 souqHubInitErrorMonitoring();
 
+// === SOUQ HUB - Supabase Cloud Database Integration ===
+const SOUQHUB_SUPABASE_CONFIG = {
+    url: "https://nosklfnqzyavhtgdmzt.supabase.co",
+    publishableKey: "sb_publishable_GJyCihj7uCLmvdwqy91LNA_dwNzT-KL",
+    sdkUrl: "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"
+};
+
+let _souqHubSupabaseClient = null;
+let _souqHubSupabasePromise = null;
+
+function souqHubGetSupabaseClient() {
+    if (_souqHubSupabaseClient) {
+        return Promise.resolve(_souqHubSupabaseClient);
+    }
+    if (_souqHubSupabasePromise) {
+        return _souqHubSupabasePromise;
+    }
+
+    _souqHubSupabasePromise = new Promise((resolve) => {
+        if (typeof window === "undefined") {
+            resolve(null);
+            return;
+        }
+
+        if (window.supabase && typeof window.supabase.createClient === "function") {
+            _souqHubSupabaseClient = window.supabase.createClient(
+                SOUQHUB_SUPABASE_CONFIG.url,
+                SOUQHUB_SUPABASE_CONFIG.publishableKey
+            );
+            resolve(_souqHubSupabaseClient);
+            return;
+        }
+
+        const existingScript = document.querySelector(`script[src="${SOUQHUB_SUPABASE_CONFIG.sdkUrl}"]`);
+        if (existingScript) {
+            existingScript.addEventListener("load", () => {
+                if (window.supabase && typeof window.supabase.createClient === "function") {
+                    _souqHubSupabaseClient = window.supabase.createClient(
+                        SOUQHUB_SUPABASE_CONFIG.url,
+                        SOUQHUB_SUPABASE_CONFIG.publishableKey
+                    );
+                }
+                resolve(_souqHubSupabaseClient);
+            }, { once: true });
+            existingScript.addEventListener("error", () => resolve(null), { once: true });
+            return;
+        }
+
+        const script = document.createElement("script");
+        script.src = SOUQHUB_SUPABASE_CONFIG.sdkUrl;
+        script.async = true;
+        script.onload = () => {
+            if (window.supabase && typeof window.supabase.createClient === "function") {
+                _souqHubSupabaseClient = window.supabase.createClient(
+                    SOUQHUB_SUPABASE_CONFIG.url,
+                    SOUQHUB_SUPABASE_CONFIG.publishableKey
+                );
+            }
+            resolve(_souqHubSupabaseClient);
+        };
+        script.onerror = () => resolve(null);
+        document.head.appendChild(script);
+    });
+
+    return _souqHubSupabasePromise;
+}
+
+function mapSupabaseListingRow(row) {
+    return {
+        id: Number(row.id),
+        seller_id: row.seller_id || null,
+        name: row.name,
+        brand: row.brand,
+        price: Number(row.price || 0),
+        category: row.category,
+        condition: row.condition || "new",
+        badge: row.badge || "NEW",
+        image: row.image,
+        description: row.description,
+        sellerEmail: row.seller_email || "",
+        sellerName: row.seller_name || "البائع",
+        sellerPhone: row.seller_phone || "",
+        sellerLocation: row.seller_location || ""
+    };
+}
+
+async function souqHubSyncCloudListingsToLocal() {
+    try {
+        const client = await souqHubGetSupabaseClient();
+        if (!client) return;
+
+        const { data, error } = await client
+            .from("listings")
+            .select("*")
+            .order("created_at", { ascending: false });
+
+        if (error) {
+            notifyGmailOnError({
+                type: "Supabase Listings Sync",
+                message: error.message || "Failed to fetch listings",
+                location: "souqHubSyncCloudListingsToLocal"
+            });
+            return;
+        }
+
+        if (Array.isArray(data) && data.length > 0) {
+            const cloudMapped = data.map(mapSupabaseListingRow);
+            const cloudIds = new Set(cloudMapped.map(item => Number(item.id)));
+            const localOnly = shoeProducts.filter(item => !cloudIds.has(Number(item.id)));
+            shoeProducts = [...cloudMapped, ...localOnly];
+            try {
+                localStorage.setItem("sh_listings", JSON.stringify(shoeProducts));
+            } catch {}
+            renderCurrent();
+        }
+    } catch (err) {
+        notifyGmailOnError({
+            type: "Supabase Listings Sync",
+            message: err?.message || "Unexpected sync error",
+            location: "souqHubSyncCloudListingsToLocal"
+        });
+    }
+}
+
+async function souqHubPushListingToCloud(listingItem) {
+    try {
+        const client = await souqHubGetSupabaseClient();
+        if (!client) return;
+
+        const { data: authData } = await client.auth.getUser();
+        const authUser = authData?.user || null;
+        if (!authUser) return;
+
+        const { error } = await client
+            .from("listings")
+            .insert({
+                seller_id: authUser.id,
+                name: listingItem.name,
+                brand: listingItem.brand,
+                price: Number(listingItem.price),
+                category: listingItem.category,
+                condition: listingItem.condition || "new",
+                badge: listingItem.badge || "NEW",
+                image: listingItem.image,
+                description: listingItem.description,
+                seller_name: listingItem.sellerName || currentUser?.name || "البائع",
+                seller_phone: listingItem.sellerPhone || currentUser?.phone || "",
+                seller_location: listingItem.sellerLocation || currentUser?.location || ""
+            });
+
+        if (error) {
+            notifyGmailOnError({
+                type: "Supabase Insert Listing",
+                message: error.message || "Failed to insert listing",
+                location: "souqHubPushListingToCloud"
+            });
+        }
+    } catch (err) {
+        notifyGmailOnError({
+            type: "Supabase Insert Listing",
+            message: err?.message || "Unexpected insert error",
+            location: "souqHubPushListingToCloud"
+        });
+    }
+}
+
+async function souqHubPushOrderToCloud(orderRecord) {
+    try {
+        const client = await souqHubGetSupabaseClient();
+        if (!client) return;
+
+        const { data: authData } = await client.auth.getUser();
+        const authUser = authData?.user || null;
+        if (!authUser) return;
+
+        const { error } = await client
+            .from("orders")
+            .insert({
+                buyer_id: authUser.id,
+                courier_id: null,
+                buyer_name: orderRecord.name,
+                buyer_phone: orderRecord.phone,
+                buyer_address: orderRecord.address,
+                buyer_city: orderRecord.city,
+                wants_delivery: Boolean(orderRecord.wantsDelivery),
+                delivery_status: orderRecord.deliveryStatus || "Pending Pickup",
+                seller_name: orderRecord.sellerName || "البائع",
+                seller_phone: orderRecord.sellerPhone || "",
+                seller_location: orderRecord.sellerLocation || "",
+                payment_method: orderRecord.payment || "Cash on Delivery (COD)",
+                subtotal: Number(orderRecord.subtotal || 0),
+                shipping_fee: Number(orderRecord.shippingFee || 0),
+                buyer_fee: Number(orderRecord.buyerFee || 0),
+                seller_fee: Number(orderRecord.sellerFee || 0),
+                total: Number(orderRecord.total || 0),
+                items: Array.isArray(orderRecord.items) ? orderRecord.items : []
+            });
+
+        if (error) {
+            notifyGmailOnError({
+                type: "Supabase Insert Order",
+                message: error.message || "Failed to insert order",
+                location: "souqHubPushOrderToCloud"
+            });
+        }
+    } catch (err) {
+        notifyGmailOnError({
+            type: "Supabase Insert Order",
+            message: err?.message || "Unexpected order insert error",
+            location: "souqHubPushOrderToCloud"
+        });
+    }
+}
+
+async function souqHubPushReviewToCloud(productId, reviewObj) {
+    try {
+        const client = await souqHubGetSupabaseClient();
+        if (!client) return;
+
+        const { data: authData } = await client.auth.getUser();
+        const authUser = authData?.user || null;
+        if (!authUser) return;
+
+        const { error } = await client
+            .from("reviews")
+            .insert({
+                listing_id: Number(productId),
+                user_id: authUser.id,
+                author: reviewObj.author,
+                rating: Number(reviewObj.rating || 5),
+                comment: reviewObj.comment
+            });
+
+        if (error) {
+            notifyGmailOnError({
+                type: "Supabase Insert Review",
+                message: error.message || "Failed to insert review",
+                location: "souqHubPushReviewToCloud"
+            });
+        }
+    } catch (err) {
+        notifyGmailOnError({
+            type: "Supabase Insert Review",
+            message: err?.message || "Unexpected review insert error",
+            location: "souqHubPushReviewToCloud"
+        });
+    }
+}
+
 const app = document.getElementById("app");
 const BUYER_FEE_RATE = 0.10;
 const SELLER_FEE_RATE = 0.10;
@@ -874,7 +1123,9 @@ function renderProduct(id) {
             editingReviewId = null;
             toast("تم تحديث تقييمك وكومنتك!");
         } else {
-            reviewsByProduct[product.id] = [...currentList, { id: Date.now(), author, rating, comment, date: new Date().toLocaleDateString() }];
+            const newRev = { id: Date.now(), author, rating, comment, date: new Date().toLocaleDateString() };
+            reviewsByProduct[product.id] = [...currentList, newRev];
+            souqHubPushReviewToCloud(product.id, newRev);
             toast("تم إضافة تقييمك وكومنتك بنجاح!");
         }
         saveAll();
@@ -1242,7 +1493,7 @@ function renderSellerStudio() {
         const sellerLocation = document.getElementById("shoeSellerLocation").value.trim();
         if (!sellerPhone || !sellerLocation) return toast("رقم البائع ومكان الاستلام مطلوبين");
 
-        shoeProducts.unshift({
+        const newListing = {
             id: Date.now(),
             name: document.getElementById("shoeName").value.trim(),
             brand: document.getElementById("shoeBrand").value.trim().toUpperCase(),
@@ -1256,10 +1507,12 @@ function renderSellerStudio() {
             sellerName: currentUser.name,
             sellerPhone,
             sellerLocation
-        });
+        };
 
+        shoeProducts.unshift(newListing);
         syncUserAccount({ ...currentUser, phone: sellerPhone, location: sellerLocation });
         saveAll();
+        souqHubPushListingToCloud(newListing);
         toast("تم نشر الإعلان وتحديد مكان الاستلام!");
         go("shop");
     });
@@ -1546,7 +1799,7 @@ function renderCheckout() {
             creditUserWalletByEmail(sEmail, netAmount, `مبيعات طلب #${orderId}`);
         });
 
-        orders.push({
+        const newOrderRecord = {
             id: orderId,
             email: currentUser.email,
             name: document.getElementById("checkoutName").value.trim(),
@@ -1558,7 +1811,7 @@ function renderCheckout() {
             sellerName,
             sellerPhone,
             sellerLocation,
-            payment: document.querySelector('input[name="paymentMethod"]:checked')?.value || "Cash on Delivery",
+            payment: document.querySelector('input[name="paymentMethod"]:checked')?.value || "Cash on Delivery (COD)",
             subtotal,
             shippingFee,
             buyerFee,
@@ -1567,11 +1820,13 @@ function renderCheckout() {
             items: [...cart],
             total: grandTotal,
             date: new Date().toLocaleString()
-        });
+        };
 
+        orders.push(newOrderRecord);
         cart = [];
         saveAll();
         updateCartCount();
+        souqHubPushOrderToCloud(newOrderRecord);
         toast("تم تأكيد الطلب وإضافة المستحقات للمحافظ!");
         go("orders");
     });
@@ -1618,6 +1873,11 @@ function renderCurrent() {
         if (route === "orders") return renderOrders();
         renderHome();
     } catch (err) {
+        notifyGmailOnError({
+            type: "Render Route Error",
+            message: err?.message || "Failed to render current route",
+            location: "renderCurrent"
+        });
         app.innerHTML = `<section class="page"><div class="empty-state"><h2>حدث خطأ</h2><p>${escapeHtml(err.message)}</p></div></section>`;
     }
 }
@@ -1757,3 +2017,66 @@ updateRoleNavs();
 updateCartCount();
 applyLanguage();
 renderCurrent();
+souqHubSyncCloudListingsToLocal();
+
+// === SOUQ HUB - Self Security Check Tool ===
+async function souqHubRunSecurityCheck() {
+    const report = {
+        supabaseReachable: false,
+        authStatus: "guest",
+        walletProtection: "unknown",
+        exposedSecretKeys: false,
+        details: []
+    };
+
+    try {
+        const res = await fetch(`${SOUQHUB_SUPABASE_CONFIG.url}/auth/v1/health`);
+        report.supabaseReachable = res.ok || res.status === 401 || res.status === 400;
+        report.details.push(
+            report.supabaseReachable
+                ? `اتصال Supabase شغال (Status: ${res.status})`
+                : `تعذر الوصول لـ Supabase (Status: ${res.status})`
+        );
+    } catch (err) {
+        report.supabaseReachable = false;
+        report.details.push(`مشكلة اتصال/شبكة بـ Supabase: ${err?.message || "ERR_NAME_NOT_RESOLVED"}`);
+    }
+
+    try {
+        const client = await souqHubGetSupabaseClient();
+        if (client && client.auth) {
+            const { data } = await client.auth.getUser();
+            if (data && data.user) {
+                report.authStatus = `logged_in (${data.user.email || data.user.id})`;
+                const testUpdate = await client
+                    .from("profiles")
+                    .update({ wallet_balance: 999999 })
+                    .eq("id", data.user.id);
+
+                if (testUpdate.error) {
+                    report.walletProtection = "protected (blocked by RLS/trigger)";
+                    report.details.push("الحماية منعت التلاعب المباشر برصيد المحفظة بنجاح.");
+                } else {
+                    report.walletProtection = "WARNING (update succeeded)";
+                    report.details.push("تنبيه: محاولة تعديل رصيد المحفظة لم تُمنع!");
+                }
+            } else {
+                report.details.push("أنت حالياً في وضع زائر (غير مسجل دخول في Auth).");
+            }
+        }
+    } catch (err) {
+        report.details.push(`تعذر إتمام اختبار المحفظة: ${err?.message || err}`);
+    }
+
+    const rawCode = document.documentElement.innerHTML || "";
+    const hasServiceRole = rawCode.includes("service_role");
+    report.exposedSecretKeys = hasServiceRole;
+    report.details.push(
+        hasServiceRole
+            ? "تنبيه: تم العثور على كلمة service_role في الكود!"
+            : "تمام: لا يوجد مفتاح service_role مكشوف في الواجهة."
+    );
+
+    console.table(report.details.map((item, idx) => ({ "#": idx + 1, "التقرير": item })));
+    return report;
+}
